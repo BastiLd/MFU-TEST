@@ -1,0 +1,37 @@
+# ============================================================================
+#  WebHafen — dein eigenes Website-Hosting mit Dashboard & Analytics
+#
+#  Starten (im Ordner webhafen):   docker compose up -d --build
+#  Danach:                         http://localhost:8010  (bzw. SERVER-IP:8010)
+#
+#  ALLE Ports werden in der .env-Datei eingestellt (PORT_UI, PORT_SITES_*).
+#  Nach einer Port-Änderung:       docker compose up -d --build
+#
+#  Für ZimaOS/Portainer: die beiden ./data-Zeilen unten gegen die
+#  auskommentierten /DATA/AppData-Zeilen tauschen (siehe ANLEITUNG.md).
+# ============================================================================
+services:
+  webhafen:
+    build: .
+    container_name: webhafen
+    restart: unless-stopped
+    ports:
+      # Verwaltungs-Oberfläche
+      - "${PORT_UI:-8010}:${PORT_UI:-8010}"
+      # Portbereich für die gehosteten Websites
+      - "${PORT_SITES_START:-8011}-${PORT_SITES_END:-8043}:${PORT_SITES_START:-8011}-${PORT_SITES_END:-8043}"
+    environment:
+      PORT_UI: ${PORT_UI:-8010}
+      PORT_SITES_START: ${PORT_SITES_START:-8011}
+      PORT_SITES_END: ${PORT_SITES_END:-8043}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-BitteAendern123!}
+      APP_SECRET: ${APP_SECRET:-webhafen_bitte_aendern}
+      TZ: ${TZ:-Europe/Vienna}
+    volumes:
+      # Alle Daten (Websites, Analytics, Konfiguration) — bleiben bei Updates erhalten
+      - ./data:/data
+      # Montrigor-Website wird beim ersten Start automatisch importiert
+      # (Ordner muss neben dem webhafen-Ordner liegen; Zeile entfernen, wenn nicht gewünscht)
+      - ../montrigor-site:/seed/montrigor-site:ro
+      # --- ZimaOS-Variante (statt ./data): ---
+      # - /DATA/AppData/webhafen/data:/data

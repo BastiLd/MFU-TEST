@@ -1,0 +1,5 @@
+# Laufzeitdaten (Websites, Analytics, Logs) — gehören nicht ins Repo
+data/
+
+# Persönliche Einstellungen mit Passwort — nicht hochladen!
+.env
