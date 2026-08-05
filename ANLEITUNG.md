@@ -32,12 +32,22 @@ PORT_SITES_END=8043     ← Website-Bereich Ende
 
 Nach jeder Änderung: `docker compose up -d --build`
 
-## 3. ZimaOS / Portainer
+## 3. ZimaOS — über Portainer (WICHTIG: nicht über den ZimaOS-App-Dialog!)
 
-1. Den kompletten `webhafen`-Ordner (und daneben `montrigor-site`, wenn der Import gewünscht ist) auf die Zima kopieren, z. B. nach `/DATA/AppData/webhafen-src/`.
-2. In der `docker-compose.yml` die Volume-Zeile `./data:/data` gegen `- /DATA/AppData/webhafen/data:/data` tauschen (steht als Kommentar schon drin) und den Seed-Pfad anpassen.
-3. In Portainer: **Stacks → Add Stack → Upload/Repository** → deployen.
-4. Aufruf: `http://ZIMA-IP:8010`
+Der ZimaOS-Dialog „Eigene App installieren“ kann **keine Images bauen** (er will ein fertiges Docker-Image) und versteht weder `${...}`-Platzhalter noch Port-Bereiche. Deshalb läuft die Installation über **Portainer**, das direkt aus deinem GitHub-Repo baut:
+
+1. **Einmalig:** den Ordner `montrigor-site` auf die Zima kopieren nach `/DATA/AppData/webhafen/seed/montrigor-site` (ZimaOS-Dateien-App oder Netzwerkfreigabe).
+2. WebHafen muss auf GitHub liegen (siehe PowerShell-Befehle / Repo `BastiLd/MFU-TEST`).
+3. **Portainer → Stacks → Add stack:**
+   - Name: `webhafen`
+   - Build method: **Repository**
+   - Repository URL: `https://github.com/BastiLd/MFU-TEST`
+   - Reference: `refs/heads/main`
+   - Compose path: `docker-compose.zimaos.yml`
+   - Unten bei **Environment variables** zwei Einträge anlegen: `ADMIN_PASSWORD` = dein Passwort, `APP_SECRET` = langer Zufallstext
+4. **Deploy the stack** — der erste Build dauert ein paar Minuten. Danach: `http://ZIMA-IP:8010`
+
+Passwort später ändern: Portainer → Stack `webhafen` → Environment variables → Wert ändern → **Update the stack**. (Das Passwort wird bei jedem Start aus der Umgebungsvariable gelesen, es ist nirgendwo sonst gespeichert.)
 
 ## 4. So benutzt du WebHafen
 
@@ -48,6 +58,17 @@ Nach jeder Änderung: `docker compose up -d --build`
 - **System** → Portübersicht (belegt/frei), erzeugte Caddy-Konfiguration, Speicherplatz.
 
 Statische Sites sind zusätzlich (abschaltbar) unter `http://SERVER:8010/s/name/` erreichbar — praktisch, wenn du mal nur einen Port freigeben willst.
+
+### Websites mit eigenem Backend (API-Ziel)
+
+Manche Websites bestehen nicht nur aus Dateien, sondern brauchen ein Programm im Hintergrund — zum Beispiel, weil sie eine Datenbank lesen oder mit einem anderen Dienst sprechen müssen. WebHafen selbst führt kein Python oder Node aus, aber es kann Anfragen **weiterreichen**:
+
+- **Feld „API-Ziel"** (bei jeder Website unter ⚙ Einstellungen): Trägst du hier z. B. `192.168.68.10:8090` ein, gehen alle Aufrufe, die mit `/api/` beginnen, an diese Adresse. Alles andere bleibt normale Datei-Auslieferung.
+- **Typ „Weiterleitung"**: Der komplette Port geht an die andere Anwendung, es werden gar keine Dateien mehr ausgeliefert.
+
+Der große Vorteil des API-Ziels: Oberfläche und Backend laufen unter **derselben Adresse**. Dadurch entfallen die typischen Browser-Probleme (CORS, gemischte Inhalte), und du musst nur **einen** Port freigeben statt zwei.
+
+Erlaubt sind nur Adressen der Form `name:port` oder `http(s)://name` — alles andere wird abgewiesen, damit nichts Fremdes in die Webserver-Konfiguration gelangt.
 
 ## 5. Von außen erreichbar machen (ohne Tailscale)
 

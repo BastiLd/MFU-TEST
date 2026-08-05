@@ -256,11 +256,12 @@ async function renderOverview() {
   const cards = SITES.length ? SITES.map((x, i) =>
     '<div class="site-card rise d' + (i % 3 + 1) + (x.enabled ? '' : ' off') + '" data-tilt>' +
     '<div class="glowbar"></div>' +
-    '<h3>' + (x.type === 'php' ? '🐘' : '📄') + ' ' + esc(x.name) + '</h3>' +
+    '<h3>' + typeIcon(x.type) + ' ' + esc(x.name) + '</h3>' +
     '<div class="meta">' +
     '<span class="tag ' + (x.enabled ? 'ok' : 'off') + '">' + (x.enabled ? '● online' : '⏸ pausiert') + '</span>' +
-    '<span class="tag ' + x.type + '">' + (x.type === 'php' ? 'PHP' : 'Statisch') + '</span>' +
+    '<span class="tag ' + x.type + '">' + typeLabel(x.type) + '</span>' +
     '<span class="tag">Port ' + x.port + '</span>' +
+    (x.apiTarget ? '<span class="tag">→ ' + esc(x.apiTarget) + '</span>' : '') +
     (x.pathAlias ? '<span class="tag">/s/' + esc(x.slug) + '/</span>' : '') +
     '</div>' +
     '<div class="stats">' +
@@ -326,9 +327,13 @@ async function renderSystem() {
 }
 
 /* ---------------------------- Site-Detail ---------------------------- */
+function typeIcon(t) { return t === 'php' ? '🐘' : t === 'proxy' ? '🔀' : '📄'; }
+function typeLabel(t) { return t === 'php' ? 'PHP' : t === 'proxy' ? 'Weiterleitung' : 'Statisch'; }
+function typeTitle(t) { return t === 'php' ? 'PHP-Website' : t === 'proxy' ? 'Weiterleitung' : 'Statische Website'; }
+
 function siteShellHead(site, tab) {
   const tabs = [['dash', '📊 Dashboard'], ['files', '🗂 Dateien'], ['settings', '⚙ Einstellungen']];
-  return '<div class="page-head rise"><div><span class="eyebrow">' + (site.type === 'php' ? 'PHP-Website' : 'Statische Website') + '</span>' +
+  return '<div class="page-head rise"><div><span class="eyebrow">' + typeTitle(site.type) + '</span>' +
     '<h1>' + esc(site.name) + '</h1>' +
     '<div class="sub">' + siteURL(site) + (site.pathAlias ? ' · /s/' + esc(site.slug) + '/' : '') + '</div></div>' +
     '<div style="display:flex;gap:8px"><a class="btn sm" href="' + siteURL(site) + '" target="_blank">↗ Website öffnen</a>' +
@@ -562,7 +567,14 @@ async function renderSiteSettings(site) {
     '<label class="fld">Name<input id="sName" value="' + esc(site.name) + '"></label>' +
     '<label class="fld">Typ<select id="sType">' +
     '<option value="static"' + (site.type === 'static' ? ' selected' : '') + '>Statisch (HTML/CSS/JS)</option>' +
-    '<option value="php"' + (site.type === 'php' ? ' selected' : '') + '>PHP</option></select></label>' +
+    '<option value="php"' + (site.type === 'php' ? ' selected' : '') + '>PHP</option>' +
+    '<option value="proxy"' + (site.type === 'proxy' ? ' selected' : '') + '>Weiterleitung — ganzer Port geht an eine andere Anwendung</option>' +
+    '</select></label>' +
+    '<label class="fld">API-Ziel<input id="sApi" value="' + esc(site.apiTarget || '') + '" placeholder="z. B. 192.168.68.10:8090">' +
+    '<span class="muted" style="font-size:.82rem;line-height:1.5;display:block;margin-top:6px">' +
+    'Leer lassen, wenn die Website nur aus Dateien besteht. Ist hier etwas eingetragen, gehen alle Aufrufe, ' +
+    'die mit <code>/api/</code> beginnen, an diese Anwendung — der Rest bleibt normale Datei-Auslieferung. ' +
+    'Beim Typ „Weiterleitung" geht der komplette Port dorthin.</span></label>' +
     '<label class="fld">Port<select id="sPort">' +
     freePorts.map(p => '<option value="' + p + '"' + (p === site.port ? ' selected' : '') + '>' + p + (p === site.port ? ' (aktuell)' : '') + '</option>').join('') +
     '</select></label>' +
@@ -590,7 +602,7 @@ async function renderSiteSettings(site) {
       const d = await api('/api/sites/' + site.slug, { method: 'PATCH', json: {
         name: $('#sName').value, type: $('#sType').value, port: +$('#sPort').value,
         enabled: $('#sEnabled').checked, pathAlias: $('#sAlias').checked,
-        note: $('#sNote').value,
+        note: $('#sNote').value, apiTarget: $('#sApi').value,
         protected: $('#sProt').value.split('\n').map(x => x.trim()).filter(Boolean),
       } });
       toast('Gespeichert ✓', 'ok');
@@ -616,7 +628,11 @@ async function openNewSiteModal() {
     '<label class="fld">Name<input id="nName" placeholder="z. B. Mein Portfolio" autofocus></label>' +
     '<label class="fld">Typ<select id="nType">' +
     '<option value="static">Statisch — HTML/CSS/JS (auch GitHub-Pages-Projekte wie MFU-TEST)</option>' +
-    '<option value="php">PHP — z. B. wie die Montrigor-Website</option></select></label>' +
+    '<option value="php">PHP — z. B. wie die Montrigor-Website</option>' +
+    '<option value="proxy">Weiterleitung — ganzer Port geht an eine andere Anwendung</option></select></label>' +
+    '<label class="fld">API-Ziel (optional)<input id="nApi" placeholder="z. B. 192.168.68.10:8090">' +
+    '<span class="muted" style="font-size:.82rem;line-height:1.5;display:block;margin-top:6px">' +
+    'Nur nötig, wenn die Website ein Backend braucht. Aufrufe ab <code>/api/</code> gehen dann dorthin.</span></label>' +
     '<label class="fld">Port<select id="nPort"><option value="">Automatisch (nächster freier)</option>' +
     free.map(p => '<option value="' + p + '">' + p + '</option>').join('') + '</select></label>' +
     '<p class="muted" style="font-size:.84rem;line-height:1.5">Die Website startet mit einer schönen Platzhalter-Seite. ' +
@@ -625,7 +641,8 @@ async function openNewSiteModal() {
   $('#nCreate').addEventListener('click', async () => {
     try {
       const d = await api('/api/sites', { method: 'POST', json: {
-        name: $('#nName').value, type: $('#nType').value, port: $('#nPort').value || undefined } });
+        name: $('#nName').value, type: $('#nType').value, apiTarget: $('#nApi').value,
+        port: $('#nPort').value || undefined } });
       closeModal(); toast('Website „' + d.site.name + '" läuft auf Port ' + d.site.port + ' ✓', 'ok');
       location.hash = '#/site/' + d.site.slug + '/files';
       route();

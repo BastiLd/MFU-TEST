@@ -3,3 +3,4 @@ data/
 
 # Persönliche Einstellungen mit Passwort — nicht hochladen!
 .env
+docker-compose.zimaos.yml

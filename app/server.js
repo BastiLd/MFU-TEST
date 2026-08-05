@@ -51,6 +51,19 @@ function atomicWrite(file, content) {
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }
+/* Ziel für reverse_proxy. Der Wert landet unverändert im Caddyfile, deshalb
+   wird streng geprüft: nur host:port, optional mit http(s)://. Alles andere
+   (Leerzeichen, Zeilenumbrüche, geschweifte Klammern) wird abgewiesen. */
+function cleanProxyTarget(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return '';
+  const m = /^(?:(https?):\/\/)?([a-zA-Z0-9][a-zA-Z0-9._-]{0,252}[a-zA-Z0-9]|[a-zA-Z0-9])(?::(\d{1,5}))?$/.exec(v);
+  if (!m) return null;
+  const port = m[3] ? parseInt(m[3], 10) : 0;
+  if (m[3] && (port < 1 || port > 65535)) return null;
+  if (!m[1] && !m[3]) return null;              // ohne Schema muss ein Port dabei sein
+  return (m[1] ? m[1] + '://' : '') + m[2] + (m[3] ? ':' + port : '');
+}
 function sh(cmd, args, opts, cb) {
   execFile(cmd, args, Object.assign({ timeout: 120000 }, opts), (err, stdout, stderr) =>
     cb && cb(err ? (String(stderr || '').trim() || String(err.message)) : null, String(stdout || '')));
@@ -136,6 +149,17 @@ function buildCaddyfile() {
       out += '  respond "WebHafen: Diese Website ist gerade pausiert." 503\n}\n\n';
       continue;
     }
+    /* Typ "proxy": der ganze Port geht an eine andere Anwendung. */
+    if (s.type === 'proxy') {
+      const target = cleanProxyTarget(s.apiTarget);
+      out += target
+        ? '  reverse_proxy ' + target + '\n}\n\n'
+        : '  respond "WebHafen: Für diese Weiterleitung ist kein gültiges Ziel eingetragen." 503\n}\n\n';
+      continue;
+    }
+    /* Statisch/PHP mit Backend: /api/* geht an die Anwendung, der Rest bleibt Datei. */
+    const apiTarget = cleanProxyTarget(s.apiTarget);
+    if (apiTarget) out += '  handle /api/* {\n    reverse_proxy ' + apiTarget + '\n  }\n';
     out += '  root * ' + sitePublic(s.slug) + '\n';
     const prot = (s.protected || []).map(p => '/' + String(p).replace(/^\/+|\/+$/g, '') + '/*');
     if (prot.length) out += '  @blocked path ' + prot.join(' ') + '\n  respond @blocked 403\n';
@@ -452,15 +476,21 @@ async function handleAPI(req, res, url) {
     if (!name) return sendJSON(res, 400, { ok: false, error: 'Name fehlt.' });
     let slug = slugify(b.slug || name);
     if (findSite(slug)) return sendJSON(res, 409, { ok: false, error: 'Es gibt schon eine Site mit diesem Kürzel: ' + slug });
-    const type = b.type === 'php' ? 'php' : 'static';
+    const type = b.type === 'php' ? 'php' : b.type === 'proxy' ? 'proxy' : 'static';
+    const apiTarget = cleanProxyTarget(b.apiTarget);
+    if (apiTarget === null)
+      return sendJSON(res, 400, { ok: false, error: 'Das API-Ziel muss die Form adresse:port haben, z. B. 192.168.68.10:8090.' });
+    if (type === 'proxy' && !apiTarget)
+      return sendJSON(res, 400, { ok: false, error: 'Für eine Weiterleitung wird ein Ziel gebraucht, z. B. 192.168.68.10:8090.' });
     let port = parseInt(b.port, 10) || nextFreePort();
     if (!port) return sendJSON(res, 400, { ok: false, error: 'Kein freier Port mehr im Bereich — Bereich in der .env vergrößern.' });
     if (port !== CFG.uiPort && (port < CFG.portStart || port > CFG.portEnd))
       return sendJSON(res, 400, { ok: false, error: 'Port muss im Bereich ' + CFG.portStart + '–' + CFG.portEnd + ' liegen.' });
     if (usedPorts().has(port)) return sendJSON(res, 409, { ok: false, error: 'Port ' + port + ' ist schon vergeben.' });
     fs.mkdirSync(sitePublic(slug), { recursive: true });
-    fs.writeFileSync(path.join(sitePublic(slug), 'index.html'), starterHTML(name));
-    const site = { slug, name, type, port, enabled: true,
+    if (type !== 'proxy')
+      fs.writeFileSync(path.join(sitePublic(slug), 'index.html'), starterHTML(name));
+    const site = { slug, name, type, port, enabled: true, apiTarget,
       pathAlias: type === 'static', protected: [], createdAt: Date.now(), note: '' };
     store.sites.push(site); saveStore();
     sh('chown', ['-R', 'www-data:www-data', path.dirname(sitePublic(slug))], {}, () => {});
@@ -482,7 +512,15 @@ async function handleAPI(req, res, url) {
     if (b.note !== undefined) site.note = String(b.note);
     if (b.enabled !== undefined) site.enabled = !!b.enabled;
     if (b.pathAlias !== undefined) site.pathAlias = !!b.pathAlias;
-    if (b.type !== undefined) site.type = b.type === 'php' ? 'php' : 'static';
+    if (b.type !== undefined) site.type = b.type === 'php' ? 'php' : b.type === 'proxy' ? 'proxy' : 'static';
+    if (b.apiTarget !== undefined) {
+      const t = cleanProxyTarget(b.apiTarget);
+      if (t === null)
+        return sendJSON(res, 400, { ok: false, error: 'Das API-Ziel muss die Form adresse:port haben, z. B. 192.168.68.10:8090.' });
+      site.apiTarget = t;
+    }
+    if (site.type === 'proxy' && !site.apiTarget)
+      return sendJSON(res, 400, { ok: false, error: 'Für eine Weiterleitung wird ein Ziel gebraucht, z. B. 192.168.68.10:8090.' });
     if (b.protected !== undefined && Array.isArray(b.protected))
       site.protected = b.protected.map(x => String(x).trim()).filter(Boolean).slice(0, 30);
     if (b.port !== undefined) {
