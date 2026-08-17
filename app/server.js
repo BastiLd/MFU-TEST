@@ -64,6 +64,21 @@ function cleanProxyTarget(value) {
   if (!m[1] && !m[3]) return null;              // ohne Schema muss ein Port dabei sein
   return (m[1] ? m[1] + '://' : '') + m[2] + (m[3] ? ':' + port : '');
 }
+/* Eigene Adresse einer Website. Erlaubt sind nur http/https-Links; alles
+   andere (javascript:, data: ...) waere ein Einfallstor. Leer = wieder die
+   automatische Adresse aus Host und Port benutzen. */
+function cleanPublicUrl(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return '';
+  if (v.length > 300) return null;
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v); }
+  catch (e) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (!u.hostname) return null;
+  return u.toString().replace(/\/$/, '');
+}
+
 function sh(cmd, args, opts, cb) {
   execFile(cmd, args, Object.assign({ timeout: 120000 }, opts), (err, stdout, stderr) =>
     cb && cb(err ? (String(stderr || '').trim() || String(err.message)) : null, String(stdout || '')));
@@ -490,7 +505,10 @@ async function handleAPI(req, res, url) {
     fs.mkdirSync(sitePublic(slug), { recursive: true });
     if (type !== 'proxy')
       fs.writeFileSync(path.join(sitePublic(slug), 'index.html'), starterHTML(name));
-    const site = { slug, name, type, port, enabled: true, apiTarget,
+    const publicUrl = cleanPublicUrl(b.publicUrl);
+    if (publicUrl === null)
+      return sendJSON(res, 400, { ok: false, error: 'Die Adresse muss mit http:// oder https:// beginnen.' });
+    const site = { slug, name, type, port, enabled: true, apiTarget, publicUrl,
       pathAlias: type === 'static', protected: [], createdAt: Date.now(), note: '' };
     store.sites.push(site); saveStore();
     sh('chown', ['-R', 'www-data:www-data', path.dirname(sitePublic(slug))], {}, () => {});
@@ -510,6 +528,12 @@ async function handleAPI(req, res, url) {
     const b = await readJSONBody(req);
     if (b.name !== undefined) site.name = String(b.name).trim() || site.name;
     if (b.note !== undefined) site.note = String(b.note);
+    if (b.publicUrl !== undefined) {
+      const u = cleanPublicUrl(b.publicUrl);
+      if (u === null)
+        return sendJSON(res, 400, { ok: false, error: 'Die Adresse muss mit http:// oder https:// beginnen, z. B. https://zimaos-1.tailc4f723.ts.net' });
+      site.publicUrl = u;
+    }
     if (b.enabled !== undefined) site.enabled = !!b.enabled;
     if (b.pathAlias !== undefined) site.pathAlias = !!b.pathAlias;
     if (b.type !== undefined) site.type = b.type === 'php' ? 'php' : b.type === 'proxy' ? 'proxy' : 'static';

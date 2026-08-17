@@ -51,7 +51,10 @@ async function api(path, opts) {
   if (data.caddyError) toast('⚠️ Caddy: ' + data.caddyError, 'err');
   return data;
 }
-function siteURL(site) { return 'http://' + location.hostname + ':' + site.port; }
+function siteURL(site) {
+  // Eigene Adresse schlaegt die automatische aus Host und Port
+  return (site && site.publicUrl) ? site.publicUrl : 'http://' + location.hostname + ':' + site.port;
+}
 function stopTimers() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 
 /* Animierte Zahlen */
@@ -582,6 +585,9 @@ async function renderSiteSettings(site) {
     '<span class="switch"><input type="checkbox" id="sEnabled"' + (site.enabled ? ' checked' : '') + '><span></span></span></label>' +
     '<label class="fld" style="grid-template-columns:1fr auto;display:grid;align-items:center">Zusätzlich unter /s/' + esc(site.slug) + '/ (nur statisch)' +
     '<span class="switch"><input type="checkbox" id="sAlias"' + (site.pathAlias ? ' checked' : '') + '><span></span></span></label>' +
+    '<label class="fld">Eigene Adresse<input id="sUrl" value="' + esc(site.publicUrl || '') + '" placeholder="z. B. https://zimaos-1.tailc4f723.ts.net"></label>' +
+    '<p class="muted" style="font-size:.82rem;margin:-4px 0 8px">Leer lassen fuer die automatische Adresse ' +
+    '<b>http://' + esc(location.hostname) + ':' + site.port + '</b>. Ist hier etwas eingetragen, fuehrt „Website oeffnen" dorthin.</p>' +
     '<label class="fld">Notiz<input id="sNote" value="' + esc(site.note || '') + '" placeholder="optional"></label>' +
     '</div></div>' +
     '<div class="panel rise d2"><h3>🛡 Geschützte Ordner</h3>' +
@@ -602,7 +608,7 @@ async function renderSiteSettings(site) {
       const d = await api('/api/sites/' + site.slug, { method: 'PATCH', json: {
         name: $('#sName').value, type: $('#sType').value, port: +$('#sPort').value,
         enabled: $('#sEnabled').checked, pathAlias: $('#sAlias').checked,
-        note: $('#sNote').value, apiTarget: $('#sApi').value,
+        note: $('#sNote').value, apiTarget: $('#sApi').value, publicUrl: $('#sUrl').value,
         protected: $('#sProt').value.split('\n').map(x => x.trim()).filter(Boolean),
       } });
       toast('Gespeichert ✓', 'ok');
