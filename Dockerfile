@@ -6,10 +6,11 @@ FROM alpine:3.21
 
 RUN apk add --no-cache \
       caddy supervisor nodejs unzip zip tzdata curl \
-      php83 php83-fpm php83-opcache php83-session php83-ctype php83-fileinfo \
+      'php83>=8.3.36' 'php83-fpm>=8.3.36' php83-opcache php83-session php83-ctype php83-fileinfo \
       php83-mbstring php83-openssl php83-curl php83-gd php83-iconv \
       php83-simplexml php83-dom php83-xml php83-tokenizer \
       php83-pdo php83-pdo_sqlite php83-sqlite3 php83-pdo_mysql \
+ && php83 -r 'exit(version_compare(PHP_VERSION, "8.3.36", ">=") ? 0 : 1);' \
  && (addgroup -S www-data 2>/dev/null || true) \
  && (adduser -S -D -H -G www-data www-data 2>/dev/null || true)
 
