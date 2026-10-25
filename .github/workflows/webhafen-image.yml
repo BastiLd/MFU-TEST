@@ -34,7 +34,9 @@ jobs:
       - name: Check JavaScript and run regression tests
         run: |
           node --check app/server.js
+          node --check app/github.js
           node --check app/ui/app.js
+          node --check app/ui/github.js
           node --test tests/*.test.js
 
       - name: Log in to GitHub Container Registry

@@ -1,6 +1,6 @@
 # WebHafen auf ZimaOS aktualisieren
 
-Dieses Update ergänzt eigene HTTPS-Adressen je Website über Tailscale. Das vorhandene Design bleibt bestehen. Die Tailscale-Anmeldung und die Geräte jeder Website werden innerhalb des vorhandenen Daten-Mounts `/data` gespeichert.
+WebHafen unterstützt eigene HTTPS-Adressen je Website über Tailscale und Website-Updates direkt aus GitHub mit Branch-, Ordner- und Dateiauswahl. Das vorhandene Design bleibt bestehen. Websites, Tailscale-Verbindungen, GitHub-Konfiguration und Update-Sicherungen bleiben im vorhandenen Daten-Mount `/data` gespeichert.
 
 Der GitHub-Workflow veröffentlicht das Image unter `ghcr.io/bastild/webhafen:latest` und zusätzlich mit dem jeweiligen Commit als Tag. Den erfolgreichen Lauf unter [GitHub Actions](https://github.com/BastiLd/MFU-TEST/actions/workflows/webhafen-image.yml) prüfen. Das lokale Docker-Archiv ist eine alternative Installationsmöglichkeit.
 
@@ -19,6 +19,8 @@ Beim Einsatz von Portainer:
 Für eine neue Installation oder einen Wechsel zu einem Image-basierten Stack steht `docker-compose.zimaos.yml` bereit. Die darin verwendeten Standardports und `/DATA/AppData/webhafen/data` müssen deiner bestehenden Installation entsprechen. Nicht versehentlich einen zweiten Container auf denselben Ports starten.
 
 ## Lokal gebautes Image importieren
+
+**Das unten genannte frühere Exportarchiv enthält den Tailscale-Stand vor der GitHub-Update-Funktion. Für die aktuelle Version das Registry-Image aus dem vorherigen Abschnitt verwenden.**
 
 Das lokale Release heißt `webhafen:2026.10.25-tailscale` und ist für Linux auf x86-64 (AMD64) gebaut. Das Docker-Archiv ist `release/webhafen-2026.10.25-tailscale-amd64.tar.gz`. Es enthält das Image und keine Website-Daten oder Zugangsschlüssel.
 

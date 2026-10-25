@@ -1,0 +1,26 @@
+{
+  "feature": "Per-site selective GitHub website updates",
+  "localImage": "webhafen:2026.10.25-github-updates",
+  "tests": {
+    "command": "node --test tests/*.test.js",
+    "passed": 62,
+    "failed": 0,
+    "skipped": 0,
+    "gitTestsUseRealTemporaryRepositories": true
+  },
+  "liveContainerVerification": {
+    "publicRepository": "mdn/beginner-html-site-styled",
+    "branch": "main",
+    "selectedPaths": ["images", "index.html", "styles"],
+    "deployedFiles": ["images/firefox-icon.png", "index.html", "styles/style.css"],
+    "managerHttpStatus": 200,
+    "websiteHttpStatus": 200,
+    "websiteTitle": "My test page",
+    "websiteAndConfigurationPersistAfterContainerRecreation": true,
+    "browserChecked": ["source configuration", "folder and file selection", "branch listing", "update detection", "preview", "first overwrite acknowledgement", "deployment", "information popover", "deployed website"]
+  },
+  "limitations": [
+    "Private-repository tokens were tested with fixtures, not a real private GitHub login.",
+    "Deploys ready website files only; no repository build scripts or external backend restart."
+  ]
+}

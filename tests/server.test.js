@@ -172,3 +172,76 @@ test('per-site Tailscale API rejects unauthenticated, CSRF and missing-key reque
   assert.equal(result.data.site.tailscale, undefined);
   assert.equal(result.data.site.publicUrl, 'https://before.example.test');
 });
+
+test('GitHub configuration and deployment endpoints require authentication and CSRF', async () => {
+  const endpoint = '/api/sites/transactional-site/github';
+  for (const route of ['', '/repos?owner=example', '/branches', '/tree']) {
+    const result = await request(endpoint + route, { session: false });
+    assert.equal(result.response.status, 401);
+  }
+  for (const route of ['', '/check', '/preview', '/update', '/rollback']) {
+    const result = await request(endpoint + route, {
+      method: route ? 'POST' : 'PUT', csrf: false, body: {},
+    });
+    assert.equal(result.response.status, 403);
+  }
+  const current = await request('/api/sites/transactional-site');
+  assert.equal(current.data.site.github, undefined);
+});
+
+test('saving GitHub settings never uploads files or exposes a private token', async () => {
+  const created = await request('/api/sites', { method: 'POST', body: {
+    name: 'GitHub website', slug: 'github-site',
+  } });
+  assert.equal(created.response.status, 200);
+  const file = path.join(dataDir, 'sites', 'github-site', 'public', 'index.html');
+  const initial = fs.readFileSync(file, 'utf8');
+  const token = 'github_pat_testonlyabcdefghijklmnopqrstuvwxyz0123456789';
+  const configured = await request('/api/sites/github-site/github', { method: 'PUT', body: {
+    owner: 'example', repo: 'website', branch: 'main', folder: 'web/public', paths: ['index.html', 'assets'],
+    autoCheck: false, autoUpdate: false, intervalMinutes: 15, token,
+  } });
+  assert.equal(configured.response.status, 200, JSON.stringify(configured.data));
+  assert.equal(configured.data.site.github.owner, 'example');
+  assert.equal(configured.data.site.github.folder, 'web/public');
+  assert.equal(configured.data.site.github.tokenConfigured, true);
+  for (const route of ['/api/sites/github-site/github', '/api/sites', '/api/overview']) {
+    const result = await request(route);
+    assert.equal(result.response.status, 200);
+    assert.equal(JSON.stringify(result.data).includes(token), false);
+  }
+  assert.equal(fs.readFileSync(path.join(dataDir, 'sites.json'), 'utf8').includes(token), false);
+  assert.equal(fs.readFileSync(file, 'utf8'), initial);
+  const removed = await request('/api/sites/github-site/github', { method: 'DELETE' });
+  assert.equal(removed.response.status, 200);
+  assert.equal(removed.data.site.github, undefined);
+  assert.equal(fs.readFileSync(file, 'utf8'), initial);
+});
+
+test('invalid GitHub paths and deployment without a preview leave site files untouched', async () => {
+  const file = path.join(dataDir, 'sites', 'github-site', 'public', 'index.html');
+  const initial = fs.readFileSync(file, 'utf8');
+  const result = await request('/api/sites/github-site/github', { method: 'PUT', body: {
+    owner: 'example', repo: 'website', branch: 'main', folder: '../outside', autoCheck: false,
+  } });
+  assert.equal(result.response.status, 400);
+  const update = await request('/api/sites/github-site/github/update', { method: 'POST', body: { sha: 'invalid' } });
+  assert.ok([400, 409].includes(update.response.status));
+  assert.equal(fs.readFileSync(file, 'utf8'), initial);
+});
+
+test('deleting a GitHub-linked site removes its token while retaining website files when requested', async () => {
+  const configured = await request('/api/sites/github-site/github', { method: 'PUT', body: {
+    owner: 'example', repo: 'website', branch: 'main', autoCheck: false,
+    token: 'github_pat_testonlyabcdefghijklmnopqrstuvwxyz0123456789',
+  } });
+  assert.equal(configured.response.status, 200);
+  const removed = await request('/api/sites/github-site?files=0', { method: 'DELETE' });
+  assert.equal(removed.response.status, 200, JSON.stringify(removed.data));
+  assert.equal(fs.existsSync(path.join(dataDir, 'sites', 'github-site', 'public', 'index.html')), true);
+  assert.equal(fs.existsSync(path.join(dataDir, 'github', 'github-site')), false);
+  const archive = path.join(dataDir, 'github', '.removed');
+  const retired = fs.readdirSync(archive).find(name => name.startsWith('github-site-'));
+  assert.ok(retired);
+  assert.equal(fs.existsSync(path.join(archive, retired, 'token.json')), false);
+});

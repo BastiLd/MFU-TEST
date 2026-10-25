@@ -16,6 +16,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { TailscaleManager } = require('./tailscale');
+const { GithubManager } = require('./github');
 
 /* ----------------------------- Konfiguration ----------------------------- */
 const CFG = {
@@ -110,6 +111,15 @@ function nextFreePort() {
 const tailscale = new TailscaleManager({
   dataDir: CFG.dataDir, secret: CFG.secret,
   getSites: () => store.sites, saveSites: saveStore,
+});
+const siteMutations = new Set();
+const github = new GithubManager({
+  dataDir: CFG.dataDir, secret: CFG.secret,
+  getSites: () => store.sites, saveSites: saveStore, sitePublic,
+  isSiteBusy: site => siteMutations.has(site.slug) || tailscale.busy.has(site.slug),
+  onFilesChanged: site => new Promise(resolve => {
+    sh('chown', ['-R', 'www-data:www-data', sitePublic(site.slug)], {}, () => resolve());
+  }),
 });
 
 /* --------------------------- Montrigor-Auto-Import ------------------------ */
@@ -536,6 +546,45 @@ async function handleAPI(req, res, url) {
   if (!site) return sendJSON(res, 404, { ok: false, error: 'Site nicht gefunden.' });
   const sub = m[2] || '';
 
+  /* GitHub changes only managed website files, never a running external backend. */
+  if (sub === '/github' || sub.startsWith('/github/')) {
+    if (sub === '/github') {
+      if (req.method === 'PUT') await github.configure(site, await readJSONBody(req));
+      else if (req.method === 'DELETE') await github.disconnect(site);
+      else if (req.method !== 'GET') return sendJSON(res, 405, { ok: false, error: 'Methode nicht erlaubt.' });
+      return sendJSON(res, 200, { ok: true, site: await github.status(site) });
+    }
+    if (sub === '/github/repos' && req.method === 'GET')
+      return sendJSON(res, 200, { ok: true, repos: await github.repos(site, url.searchParams.get('owner')) });
+    if (sub === '/github/branches' && req.method === 'GET')
+      return sendJSON(res, 200, { ok: true, branches: await github.branches(site, url.searchParams.get('owner'), url.searchParams.get('repo')) });
+    if (sub === '/github/tree' && req.method === 'GET')
+      return sendJSON(res, 200, { ok: true, ...await github.tree(site, url.searchParams.get('path') || '', url.searchParams.get('scope') === 'repository') });
+    if (sub === '/github/check' && req.method === 'POST') {
+      await github.check(site);
+      return sendJSON(res, 200, { ok: true, site: await github.status(site) });
+    }
+    if (sub === '/github/preview' && req.method === 'POST')
+      return sendJSON(res, 200, { ok: true, preview: await github.preview(site), site: await github.status(site) });
+    if (sub === '/github/update' && req.method === 'POST') {
+      await github.update(site, await readJSONBody(req));
+      return sendJSON(res, 202, { ok: true, site: await github.status(site) });
+    }
+    if (sub === '/github/rollback' && req.method === 'POST') {
+      await github.rollback(site);
+      return sendJSON(res, 202, { ok: true, site: await github.status(site) });
+    }
+    return sendJSON(res, 404, { ok: false, error: 'Unbekannter GitHub-API-Pfad.' });
+  }
+
+  const mutating = req.method !== 'GET';
+  if (mutating) {
+    github.assertIdle(site);
+    tailscale.assertIdle(site);
+    siteMutations.add(site.slug);
+  }
+  try {
+
   if (sub === '' && req.method === 'GET') return sendJSON(res, 200, { ok: true, site });
 
   if (sub === '/tailscale') {
@@ -588,7 +637,7 @@ async function handleAPI(req, res, url) {
     tailscale.busy.add(site.slug);
     Object.assign(site, updated);
     saveStore();
-    return applyCaddy(async err => {
+    return await new Promise(resolve => applyCaddy(async err => {
       try {
         tailscale.busy.delete(site.slug);
         if (site.tailscale && err) {
@@ -598,11 +647,13 @@ async function handleAPI(req, res, url) {
         if (site.tailscale && (previous.port !== site.port || previous.enabled !== site.enabled)) await tailscale.reconcile(site);
         sendJSON(res, 200, { ok: true, site, caddyError: err || undefined });
       } catch (e) { tailscale.busy.delete(site.slug); sendJSON(res, e.statusCode || 500, { ok: false, error: e.message }); }
-    });
+      finally { resolve(); }
+    }));
   }
 
   if (sub === '' && req.method === 'DELETE') {
     await tailscale.remove(site);
+    github.disposeSite(site);
     const withFiles = url.searchParams.get('files') === '1';
     store.sites = store.sites.filter(s => s.slug !== site.slug);
     saveStore(); A.delete(site.slug);
@@ -611,7 +662,9 @@ async function handleAPI(req, res, url) {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
       try { fs.rmSync(logPath(site.slug), { force: true }); } catch (_) {}
     }
-    return applyCaddy(err => sendJSON(res, 200, { ok: true, caddyError: err || undefined }));
+    return await new Promise(resolve => applyCaddy(err => {
+      sendJSON(res, 200, { ok: true, caddyError: err || undefined }); resolve();
+    }));
   }
 
   /* ---- Dateimanager ---- */
@@ -739,6 +792,9 @@ async function handleAPI(req, res, url) {
   }
 
   return sendJSON(res, 404, { ok: false, error: 'Unbekannter API-Pfad.' });
+  } finally {
+    if (mutating) siteMutations.delete(site.slug);
+  }
 }
 
 /* ------------------------------- UI ausliefern ---------------------------- */
@@ -766,6 +822,7 @@ function main() {
   /* Falls Caddy schon läuft (Manager-Neustart im laufenden Container): neu laden */
   applyCaddy(() => {});
   tailscale.start();
+  github.start();
 
   setInterval(pollLogs, 2000);
   setInterval(() => {
@@ -773,6 +830,7 @@ function main() {
   }, 10000);
   process.on('SIGTERM', () => {
     tailscale.stop();
+    github.stop();
     for (const [slug, st] of A) if (st.dirty) try { persistAgg(slug, st); } catch (_) {}
     process.exit(0);
   });

@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.title="WebHafen" \
       org.opencontainers.image.source="https://github.com/BastiLd/MFU-TEST"
 
 RUN apk add --no-cache \
-      caddy supervisor nodejs unzip zip tzdata curl ca-certificates \
+      caddy supervisor nodejs git unzip zip tzdata curl ca-certificates \
       'php83>=8.3.36' 'php83-fpm>=8.3.36' php83-opcache php83-session php83-ctype php83-fileinfo \
       php83-mbstring php83-openssl php83-curl php83-gd php83-iconv \
       php83-simplexml php83-dom php83-xml php83-tokenizer \

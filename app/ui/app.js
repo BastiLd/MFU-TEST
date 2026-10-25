@@ -55,7 +55,10 @@ function siteURL(site) {
   // Eigene Adresse schlaegt die automatische aus Host und Port
   return (site && site.publicUrl) ? site.publicUrl : 'http://' + location.hostname + ':' + site.port;
 }
-function stopTimers() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+function stopTimers() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (window.WebHafenGitHub) window.WebHafenGitHub.stop();
+}
 
 /* ---------------------------- Tailscale ---------------------------- */
 function tailscaleConnectionText(ts) {
@@ -369,6 +372,7 @@ async function renderOverview() {
     '<span class="tag">Port ' + x.port + '</span>' +
     (x.apiTarget ? '<span class="tag">→ ' + esc(x.apiTarget) + '</span>' : '') +
     (x.pathAlias ? '<span class="tag">/s/' + esc(x.slug) + '/</span>' : '') +
+    '<span data-github-badge="' + esc(x.slug) + '">' + (window.WebHafenGitHub ? window.WebHafenGitHub.badge(x) : '') + '</span>' +
     '</div>' +
     '<div class="stats">' +
     '<span>Heute <b>' + fmtNum(x.today.pv) + '</b> Aufrufe</span>' +
@@ -396,6 +400,19 @@ async function renderOverview() {
     '</div>' +
     '<div class="sites">' + cards + '</div>');
   bindShell(); animateCounters(); attachTilt();
+  let checkingGitHubBadges = false;
+  liveTimer = setInterval(async () => {
+    if (checkingGitHubBadges || !window.WebHafenGitHub || !['', '#/'].includes(location.hash)) return;
+    checkingGitHubBadges = true;
+    try {
+      const data = await api('/api/sites');
+      if (!['', '#/'].includes(location.hash)) return;
+      for (const site of data.sites) {
+        const badge = document.querySelector('[data-github-badge="' + site.slug + '"]');
+        if (badge) badge.innerHTML = window.WebHafenGitHub.badge(site);
+      }
+    } catch (_) {} finally { checkingGitHubBadges = false; }
+  }, 60000);
 }
 
 /* ---------------------------- System ---------------------------- */
@@ -732,9 +749,14 @@ async function renderSiteSettings(site) {
     '<a class="btn ghost sm" href="/api/sites/' + site.slug + '/export">💾 Backup als ZIP</a>' +
     '<button class="btn danger sm" id="delBtn">🗑 Website löschen</button></div>' +
     '</div></div>' +
+    (window.WebHafenGitHub ? window.WebHafenGitHub.renderPanel(site) : '') +
     '<div class="mt rise d3" style="display:flex;justify-content:flex-end">' +
     '<button class="btn" id="saveBtn">💾 Einstellungen speichern</button></div>');
   bindShell(); bindSiteTabs(site);
+
+  if (window.WebHafenGitHub) window.WebHafenGitHub.bindPanel(site, {
+    api, toast, onChange: updated => { OVERVIEW = null; return renderSiteSettings(updated); },
+  });
 
   if ($('#tsCreateDomain')) $('#tsCreateDomain').addEventListener('click', () => openTailscaleModal(site));
   if ($('#tsEditDomain')) $('#tsEditDomain').addEventListener('click', () => openTailscaleModal(site));

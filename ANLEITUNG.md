@@ -72,7 +72,29 @@ Der große Vorteil des API-Ziels: Oberfläche und Backend laufen unter **derselb
 
 Erlaubt sind nur Adressen der Form `name:port` oder `http(s)://name` — alles andere wird abgewiesen, damit nichts Fremdes in die Webserver-Konfiguration gelangt.
 
-## 5. Eigene HTTPS-Adresse mit Tailscale
+## 5. Website-Dateien direkt aus GitHub aktualisieren
+
+Unter **Website → Einstellungen → GitHub · Website-Updates** kannst du den ZIP-Upload durch eine GitHub-Verbindung ersetzen. Die kleinen **i**-Schaltflächen erklären die einzelnen Felder.
+
+1. **GitHub-Konto / Organisation**, **Repository** und **Branch** eintragen. Die Schaltflächen **Laden** zeigen verfügbare Repositories und Branches an; Namen lassen sich auch direkt eingeben.
+2. Den **Website-Ordner** wählen, beispielsweise `server/public` oder `website/dist`. WebHafen übernimmt dessen **Inhalt** direkt in das bestehende Website-Verzeichnis. Optional einzelne Dateien oder Unterordner auswählen. Ein leerer Ordnerpfad bedeutet das Repository-Hauptverzeichnis, eine leere Dateiauswahl den gesamten gewählten Website-Ordner.
+3. **Verbindung speichern & prüfen** drücken. Das speichert die Quelle und prüft den Branch, ändert aber noch keine Website-Dateien. Unter **Ordner und Dateien auswählen** kannst du den gespeicherten Branch durchsuchen und deine Auswahl anschließend speichern.
+4. **Änderungen ansehen** zeigt neue, geänderte und entfernte Dateien sowie Konflikte. Bei der ersten Übernahme müssen vorhandene Dateien aus einem bisherigen Upload ausdrücklich zur Ersetzung bestätigt werden.
+5. **Update übernehmen** installiert genau den Commit aus dieser Vorschau. Neuere Änderungen auf dem Branch werden erst bei einer weiteren Prüfung übernommen.
+
+Beispiel: Liegen `index.html` und `assets/` im Repository unter `apps/meine-seite/public/`, trägst du diesen Pfad als Website-Ordner ein. Die Website erhält dann direkt `index.html` und `assets/`; andere Anwendungen und Dateien daneben werden nicht veröffentlicht.
+
+**Automatische Prüfungen** sind standardmäßig aktiviert, mit einem Intervall von 15 Minuten. WebHafen zeigt verfügbare Updates in den Einstellungen und auf der Website-Karte an. Änderungen außerhalb deiner Dateiauswahl lösen kein Website-Update aus. **Automatische Installation** ist eine separate, standardmäßig ausgeschaltete Option. Die erste Übernahme und vorhandene Dateikonflikte werden nicht ohne deine Prüfung überschrieben.
+
+**Private Repositories:** Einen Fine-grained Personal Access Token für das gewünschte Repository mit **Contents: Read-only** eintragen. Öffentliche Repositories funktionieren ohne Token. Der Token wird verschlüsselt außerhalb der veröffentlichten Website gespeichert und nie zurückgegeben. Den vorhandenen `APP_SECRET` und den kompletten `/data`-Mount bei Container-Updates beibehalten. [GitHub beschreibt die benötigte Leseberechtigung hier.](https://docs.github.com/en/rest/repos/contents#get-repository-content)
+
+Vor einer Übernahme sichert WebHafen die betroffenen Website-Dateien. **Vorherige Version wiederherstellen** stellt diesen Stand wieder her. Eigene unverwaltete Dateien und Laufzeitdaten werden nicht pauschal gelöscht. Lokale Änderungen an bereits verwalteten Dateien werden als Konflikt gemeldet. Änderungen dann zuerst im Repository nachziehen oder bewusst in der lokalen Website auflösen. Geschützte Ordner, Zugangsdaten und Datenbanken gehören nicht in den veröffentlichten GitHub-Inhalt.
+
+Die Verbindung aktualisiert Website-Dateien für statische und PHP-Websites. Sie führt keine Build-Befehle, Paketinstallationen oder Repository-Skripte aus und startet keinen externen Python-, Node- oder Docker-Server neu. Bei Projekten mit einem Build-Schritt muss der ausgewählte Branch/Ordner bereits die fertigen Website-Dateien enthalten. Eine reine Weiterleitung auf einen anderen Server kann über diese Funktion keine Dateien dieses Servers ändern.
+
+**Verbindung trennen** beendet Prüfungen und Updates und entfernt den gespeicherten Token; die bisherige Website bleibt erhalten. GitHub-Cache und Sicherungen liegen privat unter `/data/github` und werden nicht als Website ausgeliefert.
+
+## 6. Eigene HTTPS-Adresse mit Tailscale
 
 1. In WebHafen **System → Tailscale** öffnen. In der [Tailscale-Verwaltung](https://login.tailscale.com/admin/settings/keys) einen Auth-Key mit **Reusable** erstellen, **Ephemeral** deaktivieren und bei erforderlicher Gerätefreigabe **Pre-approved** wählen. Den Key in WebHafen eingeben und **Auth-Key speichern** drücken. Der Key wird verschlüsselt gespeichert und nicht wieder angezeigt.
 2. In [Tailscale → DNS](https://login.tailscale.com/admin/dns) **MagicDNS** und **HTTPS** aktivieren. Für öffentliche Adressen muss **Funnel** für die jeweiligen Geräte erlaubt sein.
