@@ -11,7 +11,7 @@ Jede Website bekommt einen eigenen Port, einen **📊-Dashboard-Button** mit ech
 Docker Desktop muss installiert sein und laufen. Dann in PowerShell:
 
 ```powershell
-cd "C:\Users\basti\OneDrive - CHS Villach\Attachments\Websites\webhafen"
+cd "C:\Users\basti\Nextcloud\Documents\Github\Webhafen"
 docker compose up -d --build
 ```
 
@@ -32,22 +32,24 @@ PORT_SITES_END=8043     ← Website-Bereich Ende
 
 Nach jeder Änderung: `docker compose up -d --build`
 
-## 3. ZimaOS — über Portainer (WICHTIG: nicht über den ZimaOS-App-Dialog!)
+## 3. ZimaOS — fertiges Image installieren oder aktualisieren
 
-Der ZimaOS-Dialog „Eigene App installieren“ kann **keine Images bauen** (er will ein fertiges Docker-Image) und versteht weder `${...}`-Platzhalter noch Port-Bereiche. Deshalb läuft die Installation über **Portainer**, das direkt aus deinem GitHub-Repo baut:
+WebHafen wird vom GitHub-Workflow als fertiges Image unter `ghcr.io/bastild/webhafen:latest` veröffentlicht. Die Datei `docker-compose.zimaos.yml` benutzt dieses Image und baut auf ZimaOS nichts selbst. Nach einem erfolgreichen Build unter [GitHub Actions](https://github.com/BastiLd/MFU-TEST/actions/workflows/webhafen-image.yml) ist das neue Image abrufbar. Den Registry-Wechsel in ZimaOS und den alternativen Import eines lokalen Docker-Archivs beschreibt [UPDATE-ZIMAOS.md](UPDATE-ZIMAOS.md).
 
-1. **Einmalig:** den Ordner `montrigor-site` auf die Zima kopieren nach `/DATA/AppData/webhafen/seed/montrigor-site` (ZimaOS-Dateien-App oder Netzwerkfreigabe).
-2. WebHafen muss auf GitHub liegen (siehe PowerShell-Befehle / Repo `BastiLd/MFU-TEST`).
-3. **Portainer → Stacks → Add stack:**
-   - Name: `webhafen`
-   - Build method: **Repository**
-   - Repository URL: `https://github.com/BastiLd/MFU-TEST`
-   - Reference: `refs/heads/main`
-   - Compose path: `docker-compose.zimaos.yml`
-   - Unten bei **Environment variables** zwei Einträge anlegen: `ADMIN_PASSWORD` = dein Passwort, `APP_SECRET` = langer Zufallstext
-4. **Deploy the stack** — der erste Build dauert ein paar Minuten. Danach: `http://ZIMA-IP:8010`
+**Bestehende Installation aktualisieren:** In Portainer den WebHafen-Container mit **Pull latest image / Re-pull image** neu erstellen oder den Stack aktualisieren. Den bisherigen Daten-Mount auf `/data`, alle Ports, `ADMIN_PASSWORD` und `APP_SECRET` beibehalten. Deine Websites, Statistiken und Tailscale-Verbindungen liegen unter `/data` und bleiben erhalten. Der Schlüssel `APP_SECRET` wird auch zum Verschlüsseln des gespeicherten Tailscale-Auth-Keys verwendet. Ist noch ein mitgelieferter Beispielwert gesetzt, vor dem ersten Verknüpfen einmalig einen eigenen langen Zufallstext setzen; danach beibehalten.
 
-Passwort später ändern: Portainer → Stack `webhafen` → Environment variables → Wert ändern → **Update the stack**. (Das Passwort wird bei jedem Start aus der Umgebungsvariable gelesen, es ist nirgendwo sonst gespeichert.)
+**Neue Installation:** Portainer → Stacks → Add stack → Web editor; Inhalt von `docker-compose.zimaos.yml` einfügen. Unter Environment variables `ADMIN_PASSWORD` und `APP_SECRET` setzen; Datenpfad und Ports an die Zima anpassen. Danach **Deploy the stack** und `http://ZIMA-IP:8010` öffnen. Der optionale Seed-Mount wird nur für einen ersten Montrigor-Import benötigt.
+
+Mit SSH und Docker Compose lautet das Update:
+
+```sh
+docker compose -f docker-compose.zimaos.yml pull
+docker compose -f docker-compose.zimaos.yml up -d
+```
+
+Ein lokales, noch nicht veröffentlichtes Image lässt sich als Docker-Archiv importieren. Den konkreten Export und die Schritte dafür beschreibt [UPDATE-ZIMAOS.md](UPDATE-ZIMAOS.md).
+
+Passwort ändern: Portainer → Stack `webhafen` → Environment variables → `ADMIN_PASSWORD` ändern → **Update the stack**. `APP_SECRET` dabei beibehalten.
 
 ## 4. So benutzt du WebHafen
 
@@ -70,7 +72,24 @@ Der große Vorteil des API-Ziels: Oberfläche und Backend laufen unter **derselb
 
 Erlaubt sind nur Adressen der Form `name:port` oder `http(s)://name` — alles andere wird abgewiesen, damit nichts Fremdes in die Webserver-Konfiguration gelangt.
 
-## 5. Von außen erreichbar machen (ohne Tailscale)
+## 5. Eigene HTTPS-Adresse mit Tailscale
+
+1. In WebHafen **System → Tailscale** öffnen. In der [Tailscale-Verwaltung](https://login.tailscale.com/admin/settings/keys) einen Auth-Key mit **Reusable** erstellen, **Ephemeral** deaktivieren und bei erforderlicher Gerätefreigabe **Pre-approved** wählen. Den Key in WebHafen eingeben und **Auth-Key speichern** drücken. Der Key wird verschlüsselt gespeichert und nicht wieder angezeigt.
+2. In [Tailscale → DNS](https://login.tailscale.com/admin/dns) **MagicDNS** und **HTTPS** aktivieren. Für öffentliche Adressen muss **Funnel** für die jeweiligen Geräte erlaubt sein.
+3. Bei **＋ Neue Website** oder einer bestehenden Website unter **⚙ Einstellungen → Eigene Adresse** auf **Create Domain using Tailscale** klicken und z. B. `bot-studio` eingeben.
+4. Den Zugriff wählen: **Privat — Tailscale Serve** ist auch unterwegs über Tailscale erreichbar; **Öffentlich im Internet — Tailscale Funnel** ist ohne Tailscale für jeden mit der Adresse erreichbar. Bei bestehenden Websites **Create**, bei einer neuen Website **Erstellen** drücken.
+
+WebHafen legt für jede Website ein eigenes Tailscale-Gerät an und übernimmt die tatsächlich von Tailscale zugeteilte Adresse, z. B. `https://bot-studio.tailc4f723.ts.net`. Die Endung stammt aus deinem Tailnet. Verteilt Tailscale wegen eines belegten Namens einen abweichenden Namen, lehnt WebHafen die Einrichtung ab; wähle dann einen freien Namen. Eigene gekaufte Domains werden dadurch nicht registriert.
+
+Jedes neue Gerät hat seine eigenen Zugriffsrechte. Eine bestehende Freigabe der Zima an Freunde gilt nicht automatisch für die neue Website. Für privaten Zugriff das jeweilige neue Gerät unter **Tailscale → Machines → Share** freigeben. Für öffentliche Websites mit privaten Inhalten muss die Website selbst einen Login anbieten.
+
+Der bisherige manuell eingetragene Link bei **Eigene Adresse** bleibt verfügbar. Bei einer verwalteten Tailscale-Adresse lässt sich deren Zugriff ändern, der Status aktualisieren oder die Adresse entfernen. Zum Ändern des Namens erst die bestehende Adresse entfernen und dann neu erstellen. Nach einem Einrichtungsfehler ist ein ausdrücklicher Wiederholungsversuch erforderlich. Kann eine alte öffentliche Route nicht sicher zurückgesetzt werden, wird ihr Gerätezustand stillgelegt: die Adresse entfernen, das alte Gerät in Tailscale löschen und die Adresse neu anlegen; private Gerätefreigaben dann neu erteilen.
+
+Tailscale läuft vollständig im WebHafen-Container. Es werden weder Docker-Socket noch Host-Netzwerk, privilegierter Modus oder `/dev/net/tun` benötigt. Bestehendes Tailscale auf der Zima bleibt unabhängig davon bestehen. Die Verbindung wird beim Erstellen der ersten Adresse geprüft; das Speichern eines Auth-Keys allein bestätigt noch keinen erfolgreichen Tailscale-Login.
+
+Alternativ kann der Auth-Key als Container-Umgebungsvariable `TAILSCALE_AUTHKEY` gesetzt werden. Dieser Wert hat Vorrang vor dem UI und lässt sich nur in der Container-Konfiguration ändern. Tailscale-Sitzungen und Verbindungen liegen persistent unter `/data/tailscale`; diesen Ordner beim Update mit erhalten.
+
+### Ohne Tailscale
 
 Damit z. B. Freunde die Montrigor-Seite von überall öffnen können:
 

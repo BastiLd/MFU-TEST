@@ -2,10 +2,18 @@
 #  WebHafen — Image: Caddy (Webserver) + PHP-FPM (für PHP-Sites wie Montrigor)
 #                    + Node.js (Verwaltung, Analytics) + Supervisor
 # ============================================================================
+# Offizielle, reproduzierbar festgelegte Tailscale-Binaries. Die Verwaltung
+# startet je Website einen eigenen Daemon im Userspace-Modus.
+FROM tailscale/tailscale:v1.104.2@sha256:b11583ad2e93e4671128538c88cf11f460444a5d7e449311dd1933a400ab849d AS tailscale
 FROM alpine:3.21
 
+ARG WEBHAFEN_VERSION=dev
+LABEL org.opencontainers.image.title="WebHafen" \
+      org.opencontainers.image.version=$WEBHAFEN_VERSION \
+      org.opencontainers.image.source="https://github.com/BastiLd/MFU-TEST"
+
 RUN apk add --no-cache \
-      caddy supervisor nodejs unzip zip tzdata curl \
+      caddy supervisor nodejs unzip zip tzdata curl ca-certificates \
       'php83>=8.3.36' 'php83-fpm>=8.3.36' php83-opcache php83-session php83-ctype php83-fileinfo \
       php83-mbstring php83-openssl php83-curl php83-gd php83-iconv \
       php83-simplexml php83-dom php83-xml php83-tokenizer \
@@ -39,9 +47,12 @@ RUN { \
       echo 'catch_workers_output = yes'; \
     } > /etc/php83/php-fpm.d/www.conf
 
+COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
+COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled
 COPY app /app
 COPY supervisord.conf /etc/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Auch ein Windows-Checkout mit CRLF muss als Linux-Container starten.
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

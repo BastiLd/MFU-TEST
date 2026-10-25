@@ -2,3 +2,6 @@ data
 .git
 .env
 ANLEITUNG.md
+release
+tests
+node_modules

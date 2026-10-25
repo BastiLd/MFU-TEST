@@ -12,6 +12,8 @@ on:
       - 'Dockerfile'
       - 'entrypoint.sh'
       - 'supervisord.conf'
+      - 'tests/**'
+      - '.github/workflows/webhafen-image.yml'
   # Erlaubt das Bauen auch von Hand ueber den Actions-Reiter auf GitHub.
   workflow_dispatch:
 
@@ -24,6 +26,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check JavaScript and run regression tests
+        run: |
+          node --check app/server.js
+          node --check app/ui/app.js
+          node --test tests/*.test.js
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -38,6 +50,10 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          build-args: |
+            WEBHAFEN_VERSION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: |
             ghcr.io/bastild/webhafen:latest
             ghcr.io/bastild/webhafen:${{ github.sha }}

@@ -1,0 +1,22 @@
+# Portainer: Stacks > Add stack > Web editor oder Repository.
+# Bestehende Datenpfade, Ports, ADMIN_PASSWORD und APP_SECRET beim Update
+# unverändert übernehmen. Dieses Beispiel benutzt die bisherigen Standardports.
+services:
+  webhafen:
+    image: ${WEBHAFEN_IMAGE:-ghcr.io/bastild/webhafen:latest}
+    container_name: webhafen
+    restart: unless-stopped
+    ports:
+      - "${PORT_UI:-8010}:${PORT_UI:-8010}"
+      - "${PORT_SITES_START:-8011}-${PORT_SITES_END:-8043}:${PORT_SITES_START:-8011}-${PORT_SITES_END:-8043}"
+    environment:
+      PORT_UI: ${PORT_UI:-8010}
+      PORT_SITES_START: ${PORT_SITES_START:-8011}
+      PORT_SITES_END: ${PORT_SITES_END:-8043}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Vorhandenes WebHafen-Passwort eintragen}
+      APP_SECRET: ${APP_SECRET:?Vorhandenes APP_SECRET beibehalten}
+      TZ: ${TZ:-Europe/Vienna}
+    volumes:
+      - /DATA/AppData/webhafen/data:/data
+      # Optionaler einmaliger Import:
+      # - /DATA/AppData/webhafen/seed/montrigor-site:/seed/montrigor-site:ro

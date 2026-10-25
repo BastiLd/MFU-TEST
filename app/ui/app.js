@@ -57,6 +57,109 @@ function siteURL(site) {
 }
 function stopTimers() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 
+/* ---------------------------- Tailscale ---------------------------- */
+function tailscaleConnectionText(ts) {
+  if (!ts.available) return 'Tailscale ist in diesem Image nicht verfügbar. Bitte das neue WebHafen-Image installieren.';
+  if (ts.error) return ts.error;
+  if (ts.source === 'environment') return 'Auth-Key ist über die Container-Einstellungen hinterlegt.';
+  return ts.configured ? 'Auth-Key ist gespeichert.' : 'Noch kein Tailscale Auth-Key hinterlegt.';
+}
+function tailscaleHostname(name) {
+  return String(name || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-+$/g, '');
+}
+function tailscaleEditor(prefix, ts, value) {
+  value = value || {};
+  return '<div style="display:grid;gap:12px">' +
+    '<p class="muted" style="font-size:.84rem;line-height:1.6">' + esc(tailscaleConnectionText(ts)) +
+    (!ts.configured ? ' <a href="#/system" target="_blank" rel="noopener">Unter System → Tailscale einrichten</a>, danach hier auf Create drücken.' : '') + '</p>' +
+    '<label class="fld">Name der Tailscale-Adresse<input id="' + prefix + 'Hostname" value="' + esc(value.hostname || '') +
+    '" placeholder="bot-studio" maxlength="63" pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?"' + (value.hostname ? ' readonly' : '') + '>' +
+    '<span class="muted" style="font-size:.82rem;font-weight:400">Nur den Namen eingeben, z. B. bot-studio. Deine Endung .&lt;tailnet&gt;.ts.net und HTTPS kommen automatisch hinzu.' +
+    (value.hostname ? ' Für einen anderen Namen die bestehende Adresse zuerst entfernen.' : '') + '</span></label>' +
+    '<label class="fld">Zugriff<select id="' + prefix + 'Mode">' +
+    '<option value="private"' + (value.mode !== 'public' ? ' selected' : '') + '>Privat — Tailscale Serve</option>' +
+    '<option value="public"' + (value.mode === 'public' ? ' selected' : '') + '>Öffentlich im Internet — Tailscale Funnel</option></select></label>' +
+    '<p id="' + prefix + 'AccessHint" class="muted" style="font-size:.84rem;line-height:1.6"></p>' +
+    '<p class="muted" style="font-size:.82rem;line-height:1.6">Jede Website erhält ein eigenes Tailscale-Gerät. Die Freigabe deiner Zima an Freunde wird nicht übernommen. ' +
+    'Teile das neue Gerät unter <a href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener noreferrer">Tailscale → Machines → Share</a> mit deinen Freunden.</p>' +
+    '<p id="' + prefix + 'Error" role="status" style="font-size:.84rem;color:var(--err)"></p></div>';
+}
+function bindTailscaleEditor(prefix) {
+  const sel = $('#' + prefix + 'Mode');
+  const update = () => {
+    const hint = $('#' + prefix + 'AccessHint');
+    hint.textContent = sel.value === 'public'
+      ? 'Öffentlich: Jeder mit dieser Adresse kann die Website ohne Tailscale aufrufen. Die Website benötigt bei privaten Inhalten einen eigenen Login.'
+      : 'Privat: Zugriff nur über Tailscale gemäß deinen Zugriffsregeln und Gerätefreigaben. Freunde benötigen Tailscale und eine Freigabe für dieses neue Gerät.';
+    hint.style.color = sel.value === 'public' ? 'var(--warn)' : 'var(--muted)';
+  };
+  sel.addEventListener('change', update); update();
+}
+function tailscaleValues(prefix) {
+  const input = $('#' + prefix + 'Hostname');
+  const hostname = input.value.trim().toLowerCase();
+  if (!hostname || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(hostname)) {
+    input.focus(); throw new Error('Bitte einen Namen mit 1–63 kleinen Buchstaben, Ziffern oder Bindestrichen eingeben. Kein Bindestrich am Anfang oder Ende.');
+  }
+  return { hostname, mode: $('#' + prefix + 'Mode').value };
+}
+function tailscaleSiteStatus(site) {
+  const ts = site.tailscale;
+  if (!ts) return '';
+  const label = ts.status === 'ready' ? 'Adresse eingerichtet' : ts.status === 'starting' ? 'Adresse wird eingerichtet …' : ts.status === 'paused' ? 'Website und Tailscale-Adresse pausiert' : 'Einrichtung fehlgeschlagen';
+  return '<div style="display:grid;gap:8px;font-size:.84rem;line-height:1.6">' +
+    '<p role="status"><b>' + esc(label) + '</b> · ' + (ts.mode === 'public' ? 'Öffentlich (Funnel)' : 'Privat (Serve)') + '</p>' +
+    (ts.url && ts.status === 'ready' ? '<a href="' + esc(ts.url) + '" target="_blank" rel="noopener noreferrer" style="overflow-wrap:anywhere">' + esc(ts.url) + '</a>' : '') +
+    (ts.error ? '<p style="color:var(--err)">' + esc(ts.error) + '</p>' : '') +
+    '<p class="muted">Freunde brauchen eine eigene Freigabe für dieses Website-Gerät: ' +
+    '<a href="https://login.tailscale.com/admin/machines" target="_blank" rel="noopener noreferrer">Machines → Share</a>.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button class="btn ghost sm" id="tsEditDomain"' + (ts.status === 'starting' ? ' disabled' : '') + '>' + (ts.status === 'error' ? 'Erneut versuchen' : 'Zugriff ändern') + '</button>' +
+    '<button class="btn ghost sm" id="tsRefreshDomain">Status prüfen</button>' +
+    '<button class="btn ghost sm" id="tsRemoveDomain">Tailscale-Adresse entfernen</button></div></div>';
+}
+async function openTailscaleModal(site) {
+  try {
+    const ts = await api('/api/tailscale');
+    modal('<h3>Create Domain using Tailscale</h3>', tailscaleEditor('dTs', ts, site.tailscale || { hostname: '' }),
+      '<button class="btn ghost" data-close>Abbrechen</button><button class="btn" id="dTsCreate"' + (!ts.available ? ' disabled' : '') + '>Create</button>');
+    if (!site.tailscale) $('#dTsHostname').value = tailscaleHostname(site.name);
+    bindTailscaleEditor('dTs');
+    $('#dTsCreate').addEventListener('click', async () => {
+      const btn = $('#dTsCreate');
+      try {
+        const values = tailscaleValues('dTs'); btn.disabled = true; btn.textContent = 'Wird gestartet …';
+        const d = await api('/api/sites/' + site.slug + '/tailscale', { method: 'POST', json: values });
+        closeModal(); toast('Tailscale-Adresse wird eingerichtet …'); await renderSiteSettings(d.site);
+      } catch (e) {
+        if ($('#dTsError')) $('#dTsError').textContent = e.message;
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Create'; }
+      }
+    });
+  } catch (e) { toast(e.message, 'err'); }
+}
+function watchTailscaleSite(slug) {
+  const started = Date.now(); let busy = false;
+  liveTimer = setInterval(async () => {
+    if (busy || !$('#tsDomainStatus') || location.hash !== '#/site/' + slug + '/settings') return;
+    if (Date.now() - started > 180000) {
+      stopTimers(); toast('Die Einrichtung läuft noch. Mit „Status prüfen“ kannst du den aktuellen Stand abrufen.'); return;
+    }
+    busy = true;
+    try {
+      const d = await api('/api/sites/' + slug + '/tailscale');
+      if (location.hash !== '#/site/' + slug + '/settings') return;
+      if (!d.site.tailscale || d.site.tailscale.status !== 'starting') {
+        stopTimers();
+        if (d.site.tailscale && d.site.tailscale.status === 'ready') toast('Tailscale-Adresse eingerichtet ✓', 'ok');
+        await renderSiteSettings(d.site);
+      }
+    } catch (e) { stopTimers(); toast(e.message, 'err'); }
+    finally { busy = false; }
+  }, 2500);
+}
+
 /* Animierte Zahlen */
 function animateCounters(root) {
   (root || document).querySelectorAll('[data-count]').forEach(el => {
@@ -301,6 +404,7 @@ async function renderSystem() {
   OVERVIEW = await api('/api/overview');
   const s = OVERVIEW.system;
   const cf = await api('/api/caddyfile');
+  const ts = await api('/api/tailscale');
   const up = Math.floor(s.uptime);
   const uptime = Math.floor(up / 3600) + ' h ' + Math.floor(up % 3600 / 60) + ' min';
   app.innerHTML = shell('#/system',
@@ -320,9 +424,37 @@ async function renderSystem() {
     '<div>💾 Speicher: <b>' + (s.disk ? fmtBytes(s.disk.free) + ' frei von ' + fmtBytes(s.disk.total) : '–') + '</b></div>' +
     '<div>🟢 Node: <b>' + esc(s.node) + '</b></div>' +
     '</div></div></div>' +
+    '<div class="panel rise d2 mt"><h3>🔗 Tailscale</h3>' +
+    '<p class="muted mt" style="font-size:.88rem;line-height:1.6">' +
+    esc(tailscaleConnectionText(ts)) + ' Pro Website kannst du einen eigenen Namen wie <b>bot-studio.dein-tailnet.ts.net</b> erstellen. ' +
+    'Die Verbindung wird beim Erstellen einer Adresse geprüft.</p>' +
+    '<p class="muted mt" style="font-size:.84rem;line-height:1.6">Erstelle in der ' +
+    '<a href="https://login.tailscale.com/admin/settings/keys" target="_blank" rel="noopener noreferrer">Tailscale-Verwaltung einen Auth-Key</a>: ' +
+    '<b>Reusable</b> aktivieren, <b>Ephemeral</b> deaktivieren und bei Gerätefreigabe <b>Pre-approved</b> wählen. ' +
+    'Unter <a href="https://login.tailscale.com/admin/dns" target="_blank" rel="noopener noreferrer">DNS</a> müssen MagicDNS und HTTPS aktiv sein. ' +
+    'Für öffentliche Adressen muss zusätzlich Funnel erlaubt sein.</p>' +
+    '<div class="mt" style="display:grid;gap:12px;max-width:660px">' +
+    '<label class="fld">Tailscale Auth-Key<input type="password" id="tsKey" autocomplete="new-password" placeholder="tskey-auth-…"' + (ts.source === 'environment' ? ' disabled' : '') + '></label>' +
+    '<p class="muted" style="font-size:.82rem">Der Schlüssel wird verschlüsselt gespeichert und hier nie wieder angezeigt. Bestehende Adressen bleiben beim Entfernen des Schlüssels erhalten.</p>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn sm" id="tsSaveKey"' + (ts.source === 'environment' || !ts.available ? ' disabled' : '') + '>Auth-Key speichern</button>' +
+    (ts.source === 'saved' ? '<button class="btn ghost sm" id="tsRemoveKey">Gespeicherten Auth-Key entfernen</button>' : '') +
+    '</div><p id="tsKeyStatus" class="muted" role="status" style="font-size:.84rem"></p></div></div>' +
     '<div class="panel rise d3 mt"><h3>📜 Caddy-Konfiguration <span class="muted" style="font-size:.8rem">(automatisch erzeugt)</span></h3>' +
     '<pre class="cfg mt">' + esc(cf.content) + '</pre></div>');
   bindShell();
+  $('#tsSaveKey').addEventListener('click', async () => {
+    const btn = $('#tsSaveKey'), status = $('#tsKeyStatus');
+    btn.disabled = true; status.textContent = 'Auth-Key wird gespeichert …';
+    try {
+      await api('/api/tailscale', { method: 'PUT', json: { authKey: $('#tsKey').value.trim() } });
+      $('#tsKey').value = ''; toast('Tailscale Auth-Key gespeichert ✓', 'ok'); await renderSystem();
+    } catch (e) { status.textContent = e.message; btn.disabled = false; }
+  });
+  if ($('#tsRemoveKey')) $('#tsRemoveKey').addEventListener('click', async () => {
+    const btn = $('#tsRemoveKey'); btn.disabled = true;
+    try { await api('/api/tailscale', { method: 'DELETE' }); toast('Auth-Key entfernt', 'ok'); await renderSystem(); }
+    catch (e) { $('#tsKeyStatus').textContent = e.message; btn.disabled = false; }
+  });
   $('#reloadCaddy').addEventListener('click', async () => {
     try { await api('/api/caddy/reload', { method: 'POST' }); toast('Webserver neu geladen ✓', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
@@ -585,7 +717,8 @@ async function renderSiteSettings(site) {
     '<span class="switch"><input type="checkbox" id="sEnabled"' + (site.enabled ? ' checked' : '') + '><span></span></span></label>' +
     '<label class="fld" style="grid-template-columns:1fr auto;display:grid;align-items:center">Zusätzlich unter /s/' + esc(site.slug) + '/ (nur statisch)' +
     '<span class="switch"><input type="checkbox" id="sAlias"' + (site.pathAlias ? ' checked' : '') + '><span></span></span></label>' +
-    '<label class="fld">Eigene Adresse<input id="sUrl" value="' + esc(site.publicUrl || '') + '" placeholder="z. B. https://zimaos-1.tailc4f723.ts.net"></label>' +
+    '<label class="fld">Eigene Adresse<input id="sUrl" value="' + esc(site.publicUrl || '') + '" placeholder="z. B. https://bot-studio.dein-tailnet.ts.net"' + (site.tailscale ? ' disabled' : '') + '></label>' +
+    '<div id="tsDomainStatus">' + (site.tailscale ? tailscaleSiteStatus(site) : '<button class="btn ghost sm" id="tsCreateDomain">Create Domain using Tailscale</button>') + '</div>' +
     '<p class="muted" style="font-size:.82rem;margin:-4px 0 8px">Leer lassen fuer die automatische Adresse ' +
     '<b>http://' + esc(location.hostname) + ':' + site.port + '</b>. Ist hier etwas eingetragen, fuehrt „Website oeffnen" dorthin.</p>' +
     '<label class="fld">Notiz<input id="sNote" value="' + esc(site.note || '') + '" placeholder="optional"></label>' +
@@ -603,12 +736,29 @@ async function renderSiteSettings(site) {
     '<button class="btn" id="saveBtn">💾 Einstellungen speichern</button></div>');
   bindShell(); bindSiteTabs(site);
 
+  if ($('#tsCreateDomain')) $('#tsCreateDomain').addEventListener('click', () => openTailscaleModal(site));
+  if ($('#tsEditDomain')) $('#tsEditDomain').addEventListener('click', () => openTailscaleModal(site));
+  if ($('#tsRefreshDomain')) $('#tsRefreshDomain').addEventListener('click', async () => {
+    const btn = $('#tsRefreshDomain'); btn.disabled = true;
+    try { const d = await api('/api/sites/' + site.slug + '/tailscale'); await renderSiteSettings(d.site); }
+    catch (e) { toast(e.message, 'err'); if (btn.isConnected) btn.disabled = false; }
+  });
+  if ($('#tsRemoveDomain')) $('#tsRemoveDomain').addEventListener('click', async () => {
+    const btn = $('#tsRemoveDomain'); btn.disabled = true;
+    try {
+      const d = await api('/api/sites/' + site.slug + '/tailscale', { method: 'DELETE' });
+      toast('Tailscale-Adresse entfernt', 'ok'); await renderSiteSettings(d.site);
+    } catch (e) { toast(e.message, 'err'); if (btn.isConnected) btn.disabled = false; }
+  });
+  if (site.tailscale && site.tailscale.status === 'starting') watchTailscaleSite(site.slug);
+
   $('#saveBtn').addEventListener('click', async () => {
     try {
       const d = await api('/api/sites/' + site.slug, { method: 'PATCH', json: {
         name: $('#sName').value, type: $('#sType').value, port: +$('#sPort').value,
         enabled: $('#sEnabled').checked, pathAlias: $('#sAlias').checked,
-        note: $('#sNote').value, apiTarget: $('#sApi').value, publicUrl: $('#sUrl').value,
+        note: $('#sNote').value, apiTarget: $('#sApi').value,
+        ...(site.tailscale ? {} : { publicUrl: $('#sUrl').value }),
         protected: $('#sProt').value.split('\n').map(x => x.trim()).filter(Boolean),
       } });
       toast('Gespeichert ✓', 'ok');
@@ -629,6 +779,7 @@ async function renderSiteSettings(site) {
 /* ---------------------------- Neue Website ---------------------------- */
 async function openNewSiteModal() {
   OVERVIEW = OVERVIEW || await api('/api/overview').catch(() => null);
+  const ts = await api('/api/tailscale');
   const free = OVERVIEW && OVERVIEW.system ? OVERVIEW.system.ports.free : [];
   modal('<h3>＋ Neue Website</h3>',
     '<label class="fld">Name<input id="nName" placeholder="z. B. Mein Portfolio" autofocus></label>' +
@@ -641,18 +792,47 @@ async function openNewSiteModal() {
     'Nur nötig, wenn die Website ein Backend braucht. Aufrufe ab <code>/api/</code> gehen dann dorthin.</span></label>' +
     '<label class="fld">Port<select id="nPort"><option value="">Automatisch (nächster freier)</option>' +
     free.map(p => '<option value="' + p + '">' + p + '</option>').join('') + '</select></label>' +
+    '<label class="fld">Eigene Adresse (optional)<input id="nUrl" placeholder="https://meine-adresse.example"></label>' +
+    '<button class="btn ghost sm" id="nTsToggle" type="button">Create Domain using Tailscale</button>' +
+    '<div id="nTsPanel" hidden>' + tailscaleEditor('nTs', ts) + '</div>' +
     '<p class="muted" style="font-size:.84rem;line-height:1.5">Die Website startet mit einer schönen Platzhalter-Seite. ' +
     'Danach einfach im Dateimanager eine ZIP hochladen oder Dateien reinziehen.</p>',
     '<button class="btn ghost" data-close>Abbrechen</button><button class="btn" id="nCreate">⚓ Erstellen</button>');
+  let useTailscale = false;
+  bindTailscaleEditor('nTs');
+  $('#nTsToggle').addEventListener('click', () => {
+    useTailscale = !useTailscale;
+    $('#nTsPanel').hidden = !useTailscale; $('#nUrl').disabled = useTailscale;
+    $('#nTsToggle').textContent = useTailscale ? 'Tailscale-Adresse weglassen' : 'Create Domain using Tailscale';
+    $('#nCreate').textContent = useTailscale ? '⚓ Erstellen & Create Domain' : '⚓ Erstellen';
+    if (useTailscale && !$('#nTsHostname').value) $('#nTsHostname').value = tailscaleHostname($('#nName').value);
+  });
   $('#nCreate').addEventListener('click', async () => {
+    const btn = $('#nCreate'); let createdSite = null;
     try {
+      const domain = useTailscale ? tailscaleValues('nTs') : null;
+      if (domain && !ts.available) throw new Error(tailscaleConnectionText(ts));
+      btn.disabled = true; btn.textContent = 'Wird erstellt …';
       const d = await api('/api/sites', { method: 'POST', json: {
         name: $('#nName').value, type: $('#nType').value, apiTarget: $('#nApi').value,
-        port: $('#nPort').value || undefined } });
+        port: $('#nPort').value || undefined, publicUrl: domain ? '' : $('#nUrl').value } });
+      createdSite = d.site;
+      if (domain) await api('/api/sites/' + d.site.slug + '/tailscale', { method: 'POST', json: domain });
       closeModal(); toast('Website „' + d.site.name + '" läuft auf Port ' + d.site.port + ' ✓', 'ok');
-      location.hash = '#/site/' + d.site.slug + '/files';
+      OVERVIEW = null;
+      location.hash = '#/site/' + d.site.slug + (domain ? '/settings' : '/files');
       route();
-    } catch (e) { toast(e.message, 'err'); }
+    } catch (e) {
+      if (createdSite) {
+        closeModal(); OVERVIEW = null;
+        toast('Website wurde erstellt. Tailscale-Adresse konnte nicht gestartet werden: ' + e.message, 'err');
+        location.hash = '#/site/' + createdSite.slug + '/settings'; route();
+      } else {
+        toast(e.message, 'err');
+        if ($('#nTsError') && useTailscale) $('#nTsError').textContent = e.message;
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = useTailscale ? '⚓ Erstellen & Create Domain' : '⚓ Erstellen'; }
+      }
+    }
   });
 }
 

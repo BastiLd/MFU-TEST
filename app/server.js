@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { TailscaleManager } = require('./tailscale');
 
 /* ----------------------------- Konfiguration ----------------------------- */
 const CFG = {
@@ -106,6 +107,10 @@ function nextFreePort() {
   for (let p = CFG.portStart; p <= CFG.portEnd; p++) if (!used.has(p)) return p;
   return 0;
 }
+const tailscale = new TailscaleManager({
+  dataDir: CFG.dataDir, secret: CFG.secret,
+  getSites: () => store.sites, saveSites: saveStore,
+});
 
 /* --------------------------- Montrigor-Auto-Import ------------------------ */
 function seedImport() {
@@ -454,6 +459,15 @@ async function handleAPI(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
 
+  if (p === '/api/tailscale') {
+    if (req.method === 'PUT') {
+      const b = await readJSONBody(req);
+      tailscale.saveKey(b.authKey);
+    } else if (req.method === 'DELETE') tailscale.removeKey();
+    else if (req.method !== 'GET') return sendJSON(res, 405, { ok: false, error: 'Methode nicht erlaubt.' });
+    return sendJSON(res, 200, { ok: true, ...await tailscale.configStatus() });
+  }
+
   /* ---- Übersicht / System ---- */
   if (p === '/api/overview') {
     let disk = null;
@@ -502,12 +516,12 @@ async function handleAPI(req, res, url) {
     if (port !== CFG.uiPort && (port < CFG.portStart || port > CFG.portEnd))
       return sendJSON(res, 400, { ok: false, error: 'Port muss im Bereich ' + CFG.portStart + '–' + CFG.portEnd + ' liegen.' });
     if (usedPorts().has(port)) return sendJSON(res, 409, { ok: false, error: 'Port ' + port + ' ist schon vergeben.' });
-    fs.mkdirSync(sitePublic(slug), { recursive: true });
-    if (type !== 'proxy')
-      fs.writeFileSync(path.join(sitePublic(slug), 'index.html'), starterHTML(name));
     const publicUrl = cleanPublicUrl(b.publicUrl);
     if (publicUrl === null)
       return sendJSON(res, 400, { ok: false, error: 'Die Adresse muss mit http:// oder https:// beginnen.' });
+    fs.mkdirSync(sitePublic(slug), { recursive: true });
+    if (type !== 'proxy')
+      fs.writeFileSync(path.join(sitePublic(slug), 'index.html'), starterHTML(name));
     const site = { slug, name, type, port, enabled: true, apiTarget, publicUrl,
       pathAlias: type === 'static', protected: [], createdAt: Date.now(), note: '' };
     store.sites.push(site); saveStore();
@@ -524,42 +538,71 @@ async function handleAPI(req, res, url) {
 
   if (sub === '' && req.method === 'GET') return sendJSON(res, 200, { ok: true, site });
 
+  if (sub === '/tailscale') {
+    if (req.method === 'POST') {
+      await tailscale.provision(site, await readJSONBody(req));
+      return sendJSON(res, 202, { ok: true, site });
+    }
+    if (req.method === 'DELETE') await tailscale.remove(site);
+    else if (req.method !== 'GET') return sendJSON(res, 405, { ok: false, error: 'Methode nicht erlaubt.' });
+    await tailscale.getStatus(site);
+    return sendJSON(res, 200, { ok: true, site });
+  }
+
   if (sub === '' && req.method === 'PATCH') {
     const b = await readJSONBody(req);
-    if (b.name !== undefined) site.name = String(b.name).trim() || site.name;
-    if (b.note !== undefined) site.note = String(b.note);
+    tailscale.assertIdle(site);
+    const updated = { ...site };
+    if (b.name !== undefined) updated.name = String(b.name).trim() || site.name;
+    if (b.note !== undefined) updated.note = String(b.note);
     if (b.publicUrl !== undefined) {
       const u = cleanPublicUrl(b.publicUrl);
       if (u === null)
         return sendJSON(res, 400, { ok: false, error: 'Die Adresse muss mit http:// oder https:// beginnen, z. B. https://zimaos-1.tailc4f723.ts.net' });
-      site.publicUrl = u;
+      if (site.tailscale && u !== site.publicUrl)
+        return sendJSON(res, 409, { ok: false, error: 'Bitte zuerst die verwaltete Tailscale-Adresse entfernen.' });
+      updated.publicUrl = u;
     }
-    if (b.enabled !== undefined) site.enabled = !!b.enabled;
-    if (b.pathAlias !== undefined) site.pathAlias = !!b.pathAlias;
-    if (b.type !== undefined) site.type = b.type === 'php' ? 'php' : b.type === 'proxy' ? 'proxy' : 'static';
+    if (b.enabled !== undefined) updated.enabled = !!b.enabled;
+    if (b.pathAlias !== undefined) updated.pathAlias = !!b.pathAlias;
+    if (b.type !== undefined) updated.type = b.type === 'php' ? 'php' : b.type === 'proxy' ? 'proxy' : 'static';
     if (b.apiTarget !== undefined) {
       const t = cleanProxyTarget(b.apiTarget);
       if (t === null)
         return sendJSON(res, 400, { ok: false, error: 'Das API-Ziel muss die Form adresse:port haben, z. B. 192.168.68.10:8090.' });
-      site.apiTarget = t;
+      updated.apiTarget = t;
     }
-    if (site.type === 'proxy' && !site.apiTarget)
+    if (updated.type === 'proxy' && !updated.apiTarget)
       return sendJSON(res, 400, { ok: false, error: 'Für eine Weiterleitung wird ein Ziel gebraucht, z. B. 192.168.68.10:8090.' });
     if (b.protected !== undefined && Array.isArray(b.protected))
-      site.protected = b.protected.map(x => String(x).trim()).filter(Boolean).slice(0, 30);
+      updated.protected = b.protected.map(x => String(x).trim()).filter(Boolean).slice(0, 30);
     if (b.port !== undefined) {
       const port = parseInt(b.port, 10);
       if (!port || port < CFG.portStart || port > CFG.portEnd)
         return sendJSON(res, 400, { ok: false, error: 'Port muss im Bereich ' + CFG.portStart + '–' + CFG.portEnd + ' liegen.' });
       if (port !== site.port && usedPorts().has(port))
         return sendJSON(res, 409, { ok: false, error: 'Port ' + port + ' ist schon vergeben.' });
-      site.port = port;
+      updated.port = port;
     }
+    const previous = { ...site };
+    tailscale.busy.add(site.slug);
+    Object.assign(site, updated);
     saveStore();
-    return applyCaddy(err => sendJSON(res, 200, { ok: true, site, caddyError: err || undefined }));
+    return applyCaddy(async err => {
+      try {
+        tailscale.busy.delete(site.slug);
+        if (site.tailscale && err) {
+          Object.assign(site, previous); saveStore(); applyCaddy(() => {});
+          return sendJSON(res, 500, { ok: false, error: 'Webserver-Konfiguration fehlgeschlagen; Einstellungen wurden zurückgesetzt: ' + err });
+        }
+        if (site.tailscale && (previous.port !== site.port || previous.enabled !== site.enabled)) await tailscale.reconcile(site);
+        sendJSON(res, 200, { ok: true, site, caddyError: err || undefined });
+      } catch (e) { tailscale.busy.delete(site.slug); sendJSON(res, e.statusCode || 500, { ok: false, error: e.message }); }
+    });
   }
 
   if (sub === '' && req.method === 'DELETE') {
+    await tailscale.remove(site);
     const withFiles = url.searchParams.get('files') === '1';
     store.sites = store.sites.filter(s => s.slug !== site.slug);
     saveStore(); A.delete(site.slug);
@@ -722,12 +765,14 @@ function main() {
   writeCaddyfile();
   /* Falls Caddy schon läuft (Manager-Neustart im laufenden Container): neu laden */
   applyCaddy(() => {});
+  tailscale.start();
 
   setInterval(pollLogs, 2000);
   setInterval(() => {
     for (const [slug, st] of A) if (st.dirty) try { persistAgg(slug, st); } catch (_) {}
   }, 10000);
   process.on('SIGTERM', () => {
+    tailscale.stop();
     for (const [slug, st] of A) if (st.dirty) try { persistAgg(slug, st); } catch (_) {}
     process.exit(0);
   });
@@ -737,7 +782,7 @@ function main() {
     if (url.pathname.startsWith('/api/')) {
       handleAPI(req, res, url).catch(e => {
         console.error('[api]', e);
-        try { sendJSON(res, 500, { ok: false, error: 'Interner Fehler: ' + e.message }); } catch (_) {}
+        try { sendJSON(res, e.statusCode || 500, { ok: false, error: e.statusCode ? e.message : 'Interner Fehler: ' + e.message }); } catch (_) {}
       });
     } else serveUI(req, res, url);
   });

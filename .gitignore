@@ -3,4 +3,6 @@ data/
 
 # Persönliche Einstellungen mit Passwort — nicht hochladen!
 .env
-docker-compose.zimaos.yml
+# Lokal exportierte Docker-Abbilder sind kein Quellcode.
+release/*.tar
+release/*.tar.gz

@@ -1,0 +1,32 @@
+{
+  "version": "2026.10.25-tailscale",
+  "image": "webhafen:2026.10.25-tailscale",
+  "imageId": "sha256:761a4fc4977e1cfc68154400976107ed7ac8821e32d41fd0e901c2426f1594d4",
+  "platform": "linux/amd64",
+  "imageBytes": 426876980,
+  "archive": "webhafen-2026.10.25-tailscale-amd64.tar.gz",
+  "archiveBytes": 117780751,
+  "archiveSha256": "eeff6ed017e607dabeec98388cee6907eaf9c0477499f1d2937eecac45bc8561",
+  "archiveDockerLoadVerified": true,
+  "workspaceMatchesRunningImage": {
+    "/app/server.js": "025787517bd2e6576a57946a4ef719c77c5503736c710f05347837d05c840e60",
+    "/app/tailscale.js": "54e9bc3fd5f4c306768e998057c3c813878b7f4c6d32f9b86e18fe169438944a",
+    "/app/ui/app.js": "67f38e1206384712f151743cf024cbe8b269500717863b2a2f753b7808d80077"
+  },
+  "httpChecksAfterContainerRecreation": {
+    "http://127.0.0.1:18010/": 200,
+    "http://127.0.0.1:18011/": 200
+  },
+  "tailscaleVersion": "1.104.2",
+  "phpVersion": "8.3.36",
+  "tests": {
+    "passed": 29,
+    "command": "node --test tests/*.test.js",
+    "verifiedBy": "main agent"
+  },
+  "limitations": [
+    "No real Tailscale auth key supplied, so tailnet login, HTTPS issuance, Serve/Funnel access and friend sharing were not tested live.",
+    "Registry image not published; use local archive import or publish the source via the existing GitHub workflow."
+  ],
+  "qaContainerStateAfterVerification": "stopped; test data volume retained"
+}
