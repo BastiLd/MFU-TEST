@@ -19,6 +19,18 @@
     "websiteAndConfigurationPersistAfterContainerRecreation": true,
     "browserChecked": ["source configuration", "folder and file selection", "branch listing", "update detection", "preview", "first overwrite acknowledgement", "deployment", "information popover", "deployed website"]
   },
+  "registryPublication": {
+    "image": "ghcr.io/bastild/webhafen:latest",
+    "sourceCommit": "7cb4dedb24a2c6e9b265cd3a330dce3faa43291c",
+    "commitTag": "ghcr.io/bastild/webhafen:7cb4dedb24a2c6e9b265cd3a330dce3faa43291c",
+    "manifestDigest": "sha256:33a19c3862973daa38845a7ad395e00b6292707a7520e95fecd5baac5f690df6",
+    "workflowUrl": "https://github.com/BastiLd/MFU-TEST/actions/runs/40219333631",
+    "workflowConclusion": "success",
+    "latestMatchesCommitTag": true,
+    "downloadedImageExecuted": true,
+    "sixAppFilesMatchGitCommitBySha256": true
+  },
+  "qaContainerStateAfterVerification": "stopped; isolated test data volume retained",
   "limitations": [
     "Private-repository tokens were tested with fixtures, not a real private GitHub login.",
     "Deploys ready website files only; no repository build scripts or external backend restart."
